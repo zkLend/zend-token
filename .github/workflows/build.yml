@@ -1,0 +1,24 @@
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+
+name: "Build"
+
+jobs:
+  lint:
+    name: "Build"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout source code"
+        uses: "actions/checkout@v3"
+
+      - name: "Install foundry nightly"
+        uses: "foundry-rs/foundry-toolchain@v1"
+        with:
+          version: "nightly"
+
+      - name: "Build contracts"
+        run: |
+          forge build
