@@ -1,0 +1,45 @@
+on:
+  push:
+    branches:
+      - "master"
+
+name: "Contract Artifacts (dev)"
+jobs:
+  build:
+    name: "Push contract artifacts"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout source code"
+        uses: "actions/checkout@v3"
+        with:
+          submodules: true
+
+      - name: "Install foundry nightly"
+        uses: "foundry-rs/foundry-toolchain@v1"
+        with:
+          version: "nightly"
+
+      - name: "Build contracts"
+        run: |
+          forge build
+
+      - name: "Set up deploy key for artifacts repo"
+        uses: "webfactory/ssh-agent@v0.7.0"
+        with:
+          ssh-private-key: "${{ secrets.ARTIFACTS_DEV_KEY }}"
+
+      - name: Push artifacts
+        run: |
+          COMMIT_HASH="$(git log -1 --format="%H")"
+          git clone --depth=1 "git@github.com:zkLend/zklend-contract-artifacts-dev" ./artifacts
+
+          mkdir -p ./artifacts/zend-token/$COMMIT_HASH
+          cp ./out/ZendToken.sol/ZendToken.json ./artifacts/zend-token/$COMMIT_HASH/
+          (cd ./artifacts/zend-token/ && rm -rf ./latest && ln -s ./$COMMIT_HASH ./latest)
+
+          cd ./artifacts
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "artifacts: add contract artifacts from CI"
+          git push
