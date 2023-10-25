@@ -35,6 +35,8 @@ jobs:
 
           mkdir -p ./artifacts/zend-token/$COMMIT_HASH
           cp ./out/ZendToken.sol/ZendToken.json ./artifacts/zend-token/$COMMIT_HASH/
+          cp ./out/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json ./artifacts/zend-token/$COMMIT_HASH/
+          cp ./out/ProxyAdmin.sol/ProxyAdmin.json ./artifacts/zend-token/$COMMIT_HASH/
           (cd ./artifacts/zend-token/ && rm -rf ./latest && ln -s ./$COMMIT_HASH ./latest)
 
           cd ./artifacts
