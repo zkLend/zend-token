@@ -21,6 +21,7 @@ contract TokenEscrow is OwnableUpgradeable {
         uint256 vestingAmount,
         uint256 startTime,
         uint256 endTime,
+        uint256 cliffTime,
         uint256 step
     );
     event VestingScheduleRemoved(address indexed user);
@@ -31,6 +32,7 @@ contract TokenEscrow is OwnableUpgradeable {
      * @param vestingAmount Amount to be vested over the complete period
      * @param startTime Unix timestamp in seconds for the period start time
      * @param endTime Unix timestamp in seconds for the period end time
+     * @param cliffTime Unix timestamp in seconds for the cliff time
      * @param step Interval in seconds at which vestable amounts are accumulated
      * @param lastClaimTime Unix timestamp in seconds for the last claim time
      */
@@ -39,6 +41,7 @@ contract TokenEscrow is OwnableUpgradeable {
         uint128 vestingAmount;
         uint32 startTime;
         uint32 endTime;
+        uint32 cliffTime;
         uint32 step;
         uint32 lastClaimTime;
     }
@@ -65,12 +68,17 @@ contract TokenEscrow is OwnableUpgradeable {
         uint256 vestingAmount,
         uint256 startTime,
         uint256 endTime,
+        uint256 cliffTime,
         uint256 step
     ) external onlyOwner {
         require(user != address(0), "TokenEscrow: zero address");
         require(startAmount > 0 || vestingAmount > 0, "TokenEscrow: zero amount");
         require(startTime < endTime, "TokenEscrow: invalid time range");
         require(step > 0 && endTime.sub(startTime) % step == 0, "TokenEscrow: invalid step");
+        require(
+            cliffTime >= startTime && cliffTime <= endTime && (cliffTime - startTime) % step == 0,
+            "TokenEscrow: invalid cliff time"
+        );
         require(
             vestingSchedules[user].startAmount == 0 && vestingSchedules[user].vestingAmount == 0,
             "TokenEscrow: vesting schedule already exists"
@@ -81,6 +89,7 @@ contract TokenEscrow is OwnableUpgradeable {
         require(uint256(uint128(vestingAmount)) == vestingAmount, "TokenEscrow: vestingAmount overflow");
         require(uint256(uint32(startTime)) == startTime, "TokenEscrow: startTime overflow");
         require(uint256(uint32(endTime)) == endTime, "TokenEscrow: endTime overflow");
+        require(uint256(uint32(cliffTime)) == cliffTime, "TokenEscrow: cliffTime overflow");
         require(uint256(uint32(step)) == step, "TokenEscrow: step overflow");
 
         vestingSchedules[user] = VestingSchedule({
@@ -88,11 +97,12 @@ contract TokenEscrow is OwnableUpgradeable {
             vestingAmount: uint128(vestingAmount),
             startTime: uint32(startTime),
             endTime: uint32(endTime),
+            cliffTime: uint32(cliffTime),
             step: uint32(step),
             lastClaimTime: 0
         });
 
-        emit VestingScheduleAdded(user, startAmount, vestingAmount, startTime, endTime, step);
+        emit VestingScheduleAdded(user, startAmount, vestingAmount, startTime, endTime, cliffTime, step);
     }
 
     function removeVestingSchedule(address user) external onlyOwner {
@@ -168,6 +178,10 @@ contract TokenEscrow is OwnableUpgradeable {
                 MathUpgradeable.max(uint256(vestingSchedule.lastClaimTime), uint256(vestingSchedule.startTime));
 
             if (currentStepTime <= effectiveLastClaimTime) {
+                // No step has elasped since last claim
+                amountFromVesting = 0;
+            } else if (currentStepTime < uint256(vestingSchedule.cliffTime)) {
+                // No vesting due to cliff
                 amountFromVesting = 0;
             } else {
                 uint256 totalSteps =
@@ -191,7 +205,12 @@ contract TokenEscrow is OwnableUpgradeable {
 
         uint256 totalAmount = amountFromStart + amountFromVesting;
         if (totalAmount > 0) {
-            return (totalAmount, currentStepTime, currentStepTime == uint256(vestingSchedule.endTime));
+            if (amountFromVesting == 0) {
+                // Only the start amount is taken
+                return (amountFromStart, uint256(vestingSchedule.startTime), false);
+            } else {
+                return (totalAmount, currentStepTime, currentStepTime == uint256(vestingSchedule.endTime));
+            }
         } else {
             return (0, 0, false);
         }

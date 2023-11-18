@@ -15,6 +15,7 @@ contract TokenEscrowTest is Test {
         uint256 vestingAmount,
         uint256 startTime,
         uint256 endTime,
+        uint256 cliffTime,
         uint256 step
     );
 
@@ -72,6 +73,7 @@ contract TokenEscrowTest is Test {
             1, // vestingAmount
             2, // startTime
             10, // endTime
+            2, // cliffTime
             2 // step
         );
 
@@ -82,6 +84,7 @@ contract TokenEscrowTest is Test {
             1, // vestingAmount
             2, // startTime
             10, // endTime
+            2, // cliffTime
             2 // step
         );
     }
@@ -94,9 +97,10 @@ contract TokenEscrowTest is Test {
             1, // vestingAmount
             2, // startTime
             10, // endTime
+            2, // cliffTime
             2 // step
         );
-        (, uint128 vestingAmount,,,,) = tokenEscrow.vestingSchedules(BOB);
+        (, uint128 vestingAmount,,,,,) = tokenEscrow.vestingSchedules(BOB);
         assertNotEq(vestingAmount, 0);
 
         vm.expectRevert(bytes("Ownable: caller is not the owner"));
@@ -109,7 +113,7 @@ contract TokenEscrowTest is Test {
         tokenEscrow.removeVestingSchedule(
             BOB // user
         );
-        (, vestingAmount,,,,) = tokenEscrow.vestingSchedules(BOB);
+        (, vestingAmount,,,,,) = tokenEscrow.vestingSchedules(BOB);
         assertEq(vestingAmount, 0);
     }
 
@@ -122,6 +126,7 @@ contract TokenEscrowTest is Test {
             0, // vestingAmount
             2, // startTime
             10, // endTime
+            2, // cliffTime
             1 // step
         );
 
@@ -133,6 +138,7 @@ contract TokenEscrowTest is Test {
             0xffffffffffffffffffffffffffffffff + 1, // vestingAmount
             2, // startTime
             10, // endTime
+            2, // cliffTime
             1 // step
         );
 
@@ -144,6 +150,7 @@ contract TokenEscrowTest is Test {
             1, // vestingAmount
             0xffffffff + 1, // startTime
             0xffffffff + 2, // endTime
+            0xffffffff + 1, // cliffTime
             1 // step
         );
 
@@ -155,6 +162,7 @@ contract TokenEscrowTest is Test {
             1, // vestingAmount
             2, // startTime
             0xffffffff + 1, // endTime
+            2, // cliffTime
             1 // step
         );
     }
@@ -167,6 +175,7 @@ contract TokenEscrowTest is Test {
             100, // vestingAmount
             200, // startTime
             300, // endTime
+            200, // cliffTime
             50 // step
         );
         vm.prank(OWNER);
@@ -176,6 +185,7 @@ contract TokenEscrowTest is Test {
             100, // vestingAmount
             200, // startTime
             300, // endTime
+            200, // cliffTime
             50 // step
         );
 
@@ -187,6 +197,7 @@ contract TokenEscrowTest is Test {
             100, // vestingAmount
             200, // startTime
             300, // endTime
+            200, // cliffTime
             50 // step
         );
     }
@@ -202,6 +213,7 @@ contract TokenEscrowTest is Test {
             10000, // vestingAmount
             startTime, // startTime
             startTime + step * 10, // endTime
+            startTime, // cliffTime
             step // step
         );
 
@@ -245,24 +257,38 @@ contract TokenEscrowTest is Test {
             10000, // vestingAmount
             startTime, // startTime
             startTime + step * 10, // endTime
+            startTime + step * 4, // cliffTime
             step // step
         );
 
-        // Claim 3 steps at once (including start amount)
+        // At 3 steps only the start amount is available due to cliff
         vm.warp(startTime + step * 3);
         vm.expectEmit(address(tokenEscrow));
-        emit TokenVested(ALICE, 3555);
+        emit TokenVested(ALICE, 555);
         vm.expectEmit(address(erc20Token));
         emit Transfer(
             address(tokenEscrow), // sender
             ALICE, // recipient
-            3555 // amount
+            555 // amount
+        );
+        vm.prank(ALICE);
+        tokenEscrow.withdraw();
+
+        // Claim 4 steps at once
+        vm.warp(startTime + step * 4 + step / 2);
+        vm.expectEmit(address(tokenEscrow));
+        emit TokenVested(ALICE, 4000);
+        vm.expectEmit(address(erc20Token));
+        emit Transfer(
+            address(tokenEscrow), // sender
+            ALICE, // recipient
+            4000 // amount
         );
         vm.prank(ALICE);
         tokenEscrow.withdraw();
 
         // Claim 2 steps at once
-        vm.warp(startTime + step * 5 + step / 2);
+        vm.warp(startTime + step * 6 + step / 3);
         vm.expectEmit(address(tokenEscrow));
         emit TokenVested(ALICE, 2000);
         vm.expectEmit(address(erc20Token));
@@ -277,12 +303,12 @@ contract TokenEscrowTest is Test {
         // Claim all remaining steps
         vm.warp(startTime + 3650 days);
         vm.expectEmit(address(tokenEscrow));
-        emit TokenVested(ALICE, 5000);
+        emit TokenVested(ALICE, 4000);
         vm.expectEmit(address(erc20Token));
         emit Transfer(
             address(tokenEscrow), // sender
             ALICE, // recipient
-            5000 // amount
+            4000 // amount
         );
         vm.prank(ALICE);
         tokenEscrow.withdraw();
