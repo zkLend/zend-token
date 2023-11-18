@@ -9,7 +9,14 @@ import "test/mock/MockToken.sol";
 contract TokenEscrowTest is Test {
     event TokenVested(address indexed user, uint256 amount);
     event Transfer(address indexed from, address indexed to, uint256 value);
-    event VestingScheduleAdded(address indexed user, uint256 amount, uint256 startTime, uint256 endTime, uint256 step);
+    event VestingScheduleAdded(
+        address indexed user,
+        uint256 startAmount,
+        uint256 vestingAmount,
+        uint256 startTime,
+        uint256 endTime,
+        uint256 step
+    );
 
     MockERC20 erc20Token;
     TokenEscrow tokenEscrow;
@@ -61,7 +68,8 @@ contract TokenEscrowTest is Test {
         vm.prank(ALICE);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            1, // amount
+            0, // startAmount
+            1, // vestingAmount
             2, // startTime
             10, // endTime
             2 // step
@@ -70,7 +78,8 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            1, // amount
+            0, // startAmount
+            1, // vestingAmount
             2, // startTime
             10, // endTime
             2 // step
@@ -81,13 +90,14 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            1, // amount
+            0, // startAmount
+            1, // vestingAmount
             2, // startTime
             10, // endTime
             2 // step
         );
-        (uint128 amount,,,,) = tokenEscrow.vestingSchedules(BOB);
-        assertNotEq(amount, 0);
+        (, uint128 vestingAmount,,,,) = tokenEscrow.vestingSchedules(BOB);
+        assertNotEq(vestingAmount, 0);
 
         vm.expectRevert(bytes("Ownable: caller is not the owner"));
         vm.prank(ALICE);
@@ -99,16 +109,28 @@ contract TokenEscrowTest is Test {
         tokenEscrow.removeVestingSchedule(
             BOB // user
         );
-        (amount,,,,) = tokenEscrow.vestingSchedules(BOB);
-        assertEq(amount, 0);
+        (, vestingAmount,,,,) = tokenEscrow.vestingSchedules(BOB);
+        assertEq(vestingAmount, 0);
     }
 
     function testVestingScheduleParamsMustNotOverflow() public {
-        vm.expectRevert(bytes("TokenEscrow: amount overflow"));
+        vm.expectRevert(bytes("TokenEscrow: startAmount overflow"));
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            0xffffffffffffffffffffffffffffffff + 1, // amount
+            0xffffffffffffffffffffffffffffffff + 1, // startAmount
+            0, // vestingAmount
+            2, // startTime
+            10, // endTime
+            1 // step
+        );
+
+        vm.expectRevert(bytes("TokenEscrow: vestingAmount overflow"));
+        vm.prank(OWNER);
+        tokenEscrow.setVestingSchedule(
+            BOB, // user
+            0, // startAmount
+            0xffffffffffffffffffffffffffffffff + 1, // vestingAmount
             2, // startTime
             10, // endTime
             1 // step
@@ -118,7 +140,8 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            1, // amount
+            0, // startAmount
+            1, // vestingAmount
             0xffffffff + 1, // startTime
             0xffffffff + 2, // endTime
             1 // step
@@ -128,7 +151,8 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            1, // amount
+            0, // startAmount
+            1, // vestingAmount
             2, // startTime
             0xffffffff + 1, // endTime
             1 // step
@@ -139,7 +163,8 @@ contract TokenEscrowTest is Test {
         vm.expectEmit(address(tokenEscrow));
         emit VestingScheduleAdded(
             BOB, // user
-            100, // amount
+            0, // startAmount
+            100, // vestingAmount
             200, // startTime
             300, // endTime
             50 // step
@@ -147,7 +172,8 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            100, // amount
+            0, // startAmount
+            100, // vestingAmount
             200, // startTime
             300, // endTime
             50 // step
@@ -157,7 +183,8 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             BOB, // user
-            100, // amount
+            0, // startAmount
+            100, // vestingAmount
             200, // startTime
             300, // endTime
             50 // step
@@ -171,7 +198,8 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             ALICE, // user
-            10000, // amount
+            0, // startAmount
+            10000, // vestingAmount
             startTime, // startTime
             startTime + step * 10, // endTime
             step // step
@@ -213,21 +241,22 @@ contract TokenEscrowTest is Test {
         vm.prank(OWNER);
         tokenEscrow.setVestingSchedule(
             ALICE, // user
-            10000, // amount
+            555, // startAmount
+            10000, // vestingAmount
             startTime, // startTime
             startTime + step * 10, // endTime
             step // step
         );
 
-        // Claim 3 steps at once
+        // Claim 3 steps at once (including start amount)
         vm.warp(startTime + step * 3);
         vm.expectEmit(address(tokenEscrow));
-        emit TokenVested(ALICE, 3000);
+        emit TokenVested(ALICE, 3555);
         vm.expectEmit(address(erc20Token));
         emit Transfer(
             address(tokenEscrow), // sender
             ALICE, // recipient
-            3000 // amount
+            3555 // amount
         );
         vm.prank(ALICE);
         tokenEscrow.withdraw();
