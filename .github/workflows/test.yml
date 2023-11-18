@@ -1,0 +1,26 @@
+on:
+  push:
+    branches:
+      - "master"
+  pull_request:
+
+name: "Test"
+
+jobs:
+  test:
+    name: "Test"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout source code"
+        uses: "actions/checkout@v3"
+        with:
+          submodules: "recursive"
+
+      - name: "Install foundry nightly"
+        uses: "foundry-rs/foundry-toolchain@v1"
+        with:
+          version: "nightly"
+
+      - name: "Run foundry tests"
+        run: |
+          forge test
