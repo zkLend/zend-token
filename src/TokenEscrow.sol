@@ -50,7 +50,7 @@ contract TokenEscrow is OwnableUpgradeable {
     mapping(address => VestingSchedule) public vestingSchedules;
 
     function getWithdrawableAmount(address user) external view returns (uint256) {
-        (uint256 withdrawableFromSchedule,,) = calculateWithdrawableFromSchedule(user);
+        (uint256 withdrawableFromSchedule,) = calculateWithdrawableFromSchedule(user);
 
         return withdrawableFromSchedule;
     }
@@ -122,16 +122,10 @@ contract TokenEscrow is OwnableUpgradeable {
         // Withdraw from schedule
         {
             uint256 newClaimTime;
-            bool allVested;
-            (withdrawableFromSchedule, newClaimTime, allVested) = calculateWithdrawableFromSchedule(msg.sender);
+            (withdrawableFromSchedule, newClaimTime) = calculateWithdrawableFromSchedule(msg.sender);
 
             if (withdrawableFromSchedule > 0) {
-                if (allVested) {
-                    // Remove storage slot to save gas
-                    delete vestingSchedules[msg.sender];
-                } else {
-                    vestingSchedules[msg.sender].lastClaimTime = uint32(newClaimTime);
-                }
+                vestingSchedules[msg.sender].lastClaimTime = uint32(newClaimTime);
             }
         }
 
@@ -148,18 +142,18 @@ contract TokenEscrow is OwnableUpgradeable {
     function calculateWithdrawableFromSchedule(address user)
         private
         view
-        returns (uint256 amount, uint256 newClaimTime, bool allVested)
+        returns (uint256 amount, uint256 newClaimTime)
     {
         VestingSchedule memory vestingSchedule = vestingSchedules[user];
 
         // Schedule not set?
         if (vestingSchedule.startAmount == 0 && vestingSchedule.vestingAmount == 0) {
-            return (0, 0, false);
+            return (0, 0);
         }
 
         // Schedule not started?
         if (block.timestamp < uint256(vestingSchedule.startTime)) {
-            return (0, 0, false);
+            return (0, 0);
         }
 
         uint256 currentStepTime = MathUpgradeable.min(
@@ -207,12 +201,12 @@ contract TokenEscrow is OwnableUpgradeable {
         if (totalAmount > 0) {
             if (amountFromVesting == 0) {
                 // Only the start amount is taken
-                return (amountFromStart, uint256(vestingSchedule.startTime), false);
+                return (amountFromStart, uint256(vestingSchedule.startTime));
             } else {
-                return (totalAmount, currentStepTime, currentStepTime == uint256(vestingSchedule.endTime));
+                return (totalAmount, currentStepTime);
             }
         } else {
-            return (0, 0, false);
+            return (0, 0);
         }
     }
 }
