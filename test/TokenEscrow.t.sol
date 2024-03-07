@@ -3,7 +3,7 @@ pragma solidity =0.8.21;
 
 import "forge-std/Test.sol";
 
-import "src/TokenEscrow.sol";
+import "l1/TokenEscrow.sol";
 import "test/mock/MockToken.sol";
 
 contract TokenEscrowTest is Test {
@@ -39,7 +39,7 @@ contract TokenEscrowTest is Test {
         payable(CHARLIE).transfer(1000 ether);
         payable(DAVID).transfer(1000 ether);
 
-        erc20Token = new MockERC20("Mock Token","MOCK", 8);
+        erc20Token = new MockERC20("Mock Token", "MOCK", 8);
         erc20Token.mint(
             OWNER, // account
             10_000_000_000_000000000000000000 // amount
