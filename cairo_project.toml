@@ -1,0 +1,3 @@
+[crate_roots]
+src = "l2/src"
+openzeppelin = "l2/openzeppelin"

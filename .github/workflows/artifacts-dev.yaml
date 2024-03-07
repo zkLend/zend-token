@@ -19,9 +19,13 @@ jobs:
         with:
           version: "nightly"
 
-      - name: "Build contracts"
+      - name: "Build L1 contracts"
         run: |
           forge build
+
+      - name: "Build L2 contracts"
+        run: |
+          ./scripts/compile_l2_with_docker.sh
 
       - name: "Set up deploy key for artifacts repo"
         uses: "webfactory/ssh-agent@v0.7.0"
@@ -38,6 +42,7 @@ jobs:
           cp ./out/TokenEscrow.sol/TokenEscrow.json ./artifacts/zend-token/$COMMIT_HASH/
           cp ./out/TransparentUpgradeableProxy.sol/TransparentUpgradeableProxy.json ./artifacts/zend-token/$COMMIT_HASH/
           cp ./out/ProxyAdmin.sol/ProxyAdmin.json ./artifacts/zend-token/$COMMIT_HASH/
+          cp ./build/ERC20.json ./artifacts/zend-token/$COMMIT_HASH/StarknetERC20.json
           (cd ./artifacts/zend-token/ && rm -rf ./latest && ln -s ./$COMMIT_HASH ./latest)
 
           cd ./artifacts
