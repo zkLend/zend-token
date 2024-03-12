@@ -76,6 +76,12 @@ This section lists deployed contract addresses.
 - Ethereum: [0xb2606492712D311be8f41d940AFE8CE742A52D44](https://etherscan.io/address/0xb2606492712D311be8f41d940AFE8CE742A52D44)
 - Starknet: [0x00585c32b625999e6e5e78645ff8df7a9001cf5cf3eb6b80ccdd16cb64bd3a34](https://starkscan.co/contract/0x00585c32b625999e6e5e78645ff8df7a9001cf5cf3eb6b80ccdd16cb64bd3a34)
 
+## Audits
+
+Audit reports for contracts in this repository:
+
+- [L1 token contract audit by Nethermind](./audit/nethermind.pdf)
+
 ## License
 
 Licensed under either of
