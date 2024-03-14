@@ -3,7 +3,7 @@
 mod ERC20 {
     use starknet::{ContractAddress, contract_address_const, get_caller_address};
 
-    use governance::interfaces::erc20::{IERC20};
+    use airdrop::interfaces::erc20::{IERC20};
 
     #[storage]
     struct Storage {

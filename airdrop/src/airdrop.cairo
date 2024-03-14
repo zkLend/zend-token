@@ -1,39 +1,40 @@
-use core::array::{Array, Span};
-use governance::interfaces::erc20::{IERC20Dispatcher};
+use core::array::Span;
+
 use starknet::{ContractAddress};
 
-#[derive(Copy, Drop, Serde, Hash, PartialEq, Debug)]
-pub struct Claim {
-    // the unique ID of the claim
-    pub id: u64,
-    // the address that will receive the token
-    pub claimee: ContractAddress,
-    // the amount of token the address is entitled to
-    pub amount: u128,
-}
+use airdrop::interfaces::erc20::{IERC20Dispatcher};
+
 
 #[starknet::interface]
-pub trait IAirdrop<TStorage> {
+pub trait IAirdrop<TContractState> {
     // Return the root of the airdrop
-    fn get_root(self: @TStorage) -> felt252;
+    fn get_root(self: @TContractState) -> felt252;
 
     // Return the token being dropped
-    fn get_token(self: @TStorage) -> IERC20Dispatcher;
+    fn get_token(self: @TContractState) -> IERC20Dispatcher;
 
-    // Claims the given allotment of tokens.
-    // Because this method is idempotent, it does not revert in case of a second submission of the same claim. 
-    // This makes it simpler to batch many claims together in a single transaction.
-    // Returns true iff the claim was processed. Returns false if the claim was already claimed.
-    // Panics if the proof is invalid.
-    fn claim(ref self: TStorage, claim: Claim, proof: Span<felt252>) -> bool;
+    // Return the claiming start time
+    fn get_start_time(self: @TContractState) -> u64;
 
-    // Claims the batch of up to 128 claims that must be aligned with a single bitmap, i.e. the id of the first must be a multiple of 128
-    // and the claims should be sequentially in order. The proof verification is optimized in this method.
-    // Returns the number of claims that were executed
-    fn claim_128(ref self: TStorage, claims: Span<Claim>, remaining_proof: Span<felt252>) -> u8;
+    // Return the vesting peroid duration in seconds
+    fn get_vesting_duration(self: @TContractState) -> u64;
 
-    // Return whether the claim with the given ID has been claimed
-    fn is_claimed(self: @TStorage, claim_id: u64) -> bool;
+    // Return the claimed amount of a recipient
+    fn get_claimed_amount(self: @TContractState, recipient: ContractAddress) -> u128;
+
+    // Calculates the total claimable amount based on timestamp alone
+    fn calculate_total_claimable(self: @TContractState, total_amount: u128) -> u128;
+
+    // Claim the airdrop.
+    // The `total_amount` sent in here is the total allocation amount, which is subject to vesting.
+    // Therefore, users will likely receive smaller amounts depending on when they claim.
+    // Returns true iif amount _actually_ claimed is larger than 0.
+    fn claim(
+        ref self: TContractState,
+        recipient: ContractAddress,
+        total_amount: u128,
+        proof: Span<felt252>
+    ) -> bool;
 }
 
 #[starknet::contract]
@@ -42,102 +43,49 @@ pub mod Airdrop {
     use core::hash::{LegacyHash};
     use core::num::traits::one::{One};
     use core::num::traits::zero::{Zero};
-    use governance::interfaces::erc20::{IERC20DispatcherTrait};
-    use governance::utils::exp2::{exp2};
-    use super::{IAirdrop, ContractAddress, Claim, IERC20Dispatcher};
+    use core::poseidon::hades_permutation;
 
+    use starknet::{ContractAddress, get_block_timestamp};
 
-    pub(crate) fn hash_function(a: felt252, b: felt252) -> felt252 {
-        let a_u256: u256 = a.into();
-        if a_u256 < b.into() {
-            core::pedersen::pedersen(a, b)
-        } else {
-            core::pedersen::pedersen(b, a)
-        }
-    }
+    use airdrop::interfaces::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 
-    // Compute the pedersen root of a merkle tree by combining the current node with each sibling up the tree
-    pub(crate) fn compute_pedersen_root(current: felt252, mut proof: Span<felt252>) -> felt252 {
-        match proof.pop_front() {
-            Option::Some(proof_element) => {
-                compute_pedersen_root(hash_function(current, *proof_element), proof)
-            },
-            Option::None => { current },
-        }
-    }
+    use super::{IAirdrop};
 
     #[storage]
     struct Storage {
         root: felt252,
         token: IERC20Dispatcher,
-        claimed_bitmap: LegacyMap<u64, u128>,
+        start_time: u64,
+        vesting_duration: u64,
+        claimed_amounts: LegacyMap<ContractAddress, u128>,
     }
 
-    #[derive(Drop, starknet::Event)]
-    pub(crate) struct Claimed {
-        pub claim: Claim
-    }
-
-    #[derive(starknet::Event, Drop)]
     #[event]
+    #[derive(Drop, starknet::Event)]
     enum Event {
         Claimed: Claimed,
     }
 
+    #[derive(Drop, starknet::Event)]
+    struct Claimed {
+        recipient: ContractAddress,
+        amount: u128,
+        total_amount: u128
+    }
+
+
     #[constructor]
-    fn constructor(ref self: ContractState, token: IERC20Dispatcher, root: felt252) {
+    fn constructor(
+        ref self: ContractState,
+        token: IERC20Dispatcher,
+        root: felt252,
+        start_time: u64,
+        vesting_duration: u64
+    ) {
         self.root.write(root);
         self.token.write(token);
-    }
-
-    const BITMAP_SIZE: NonZero<u64> = 128;
-
-    fn claim_id_to_bitmap_index(claim_id: u64) -> (u64, u8) {
-        let (word, index) = DivRem::div_rem(claim_id, BITMAP_SIZE);
-        (word, index.try_into().unwrap())
-    }
-
-    pub fn hash_claim(claim: Claim) -> felt252 {
-        LegacyHash::hash(selector!("ekubo::governance::airdrop::Claim"), claim)
-    }
-
-    pub fn compute_root_of_group(mut claims: Span<Claim>) -> felt252 {
-        assert(!claims.is_empty(), 'NO_CLAIMS');
-
-        let mut claim_hashes: Array<felt252> = ArrayTrait::new();
-
-        let mut last_claim_id: Option<u64> = Option::None;
-
-        while let Option::Some(claim) = claims
-            .pop_front() {
-                if let Option::Some(last_id) = last_claim_id {
-                    assert(last_id == (*claim.id - 1), 'SEQUENTIAL');
-                };
-
-                claim_hashes.append(hash_claim(*claim));
-                last_claim_id = Option::Some(*claim.id);
-            };
-
-        // will eventually contain an array of length 1
-        let mut current_layer: Span<felt252> = claim_hashes.span();
-
-        while current_layer
-            .len()
-            .is_non_one() {
-                let mut next_layer: Array<felt252> = ArrayTrait::new();
-
-                while let Option::Some(hash) = current_layer
-                    .pop_front() {
-                        next_layer
-                            .append(
-                                hash_function(*hash, *current_layer.pop_front().unwrap_or(hash))
-                            );
-                    };
-
-                current_layer = next_layer.span();
-            };
-
-        *current_layer.pop_front().unwrap()
+        self.start_time.write(start_time);
+        self.vesting_duration.write(vesting_duration);
     }
 
     #[abi(embed_v0)]
@@ -150,84 +98,110 @@ pub mod Airdrop {
             self.token.read()
         }
 
-        fn claim(ref self: ContractState, claim: Claim, proof: Span<felt252>) -> bool {
-            let leaf = hash_claim(claim);
+        fn get_start_time(self: @ContractState) -> u64 {
+            self.start_time.read()
+        }
+
+        fn get_vesting_duration(self: @ContractState) -> u64 {
+            self.vesting_duration.read()
+        }
+
+        fn get_claimed_amount(self: @ContractState, recipient: ContractAddress) -> u128 {
+            self.claimed_amounts.read(recipient)
+        }
+
+        fn calculate_total_claimable(self: @ContractState, total_amount: u128) -> u128 {
+            calculate_claimable_amount(self, total_amount)
+        }
+
+        fn claim(
+            ref self: ContractState,
+            recipient: ContractAddress,
+            total_amount: u128,
+            proof: Span<felt252>
+        ) -> bool {
+            assert(Zeroable::is_non_zero(total_amount), 'ZERO_TOTAL_AMOUNT');
+            assert(get_block_timestamp() >= self.start_time.read(), 'AIRDROP_NOT_STARTED');
+
+            let (leaf, _, _) = hades_permutation(recipient.into(), total_amount.into(), 2);
             assert(self.root.read() == compute_pedersen_root(leaf, proof), 'INVALID_PROOF');
 
-            // this is copied in from is_claimed because we only want to read the bitmap once
-            let (word, index) = claim_id_to_bitmap_index(claim.id);
-            let bitmap = self.claimed_bitmap.read(word);
-            let already_claimed = Zeroable::is_non_zero(bitmap & exp2(index));
+            let total_claimable_amount = calculate_claimable_amount(@self, total_amount);
+            let already_claimed_amount = self.claimed_amounts.read(recipient);
 
-            if already_claimed {
-                false
-            } else {
-                self.claimed_bitmap.write(word, bitmap | exp2(index.try_into().unwrap()));
+            if total_claimable_amount > already_claimed_amount {
+                let current_amount_claimed = total_claimable_amount - already_claimed_amount;
+                self.claimed_amounts.write(recipient, total_claimable_amount);
 
-                self.token.read().transfer(claim.claimee, claim.amount.into());
+                self
+                    .emit(
+                        Event::Claimed(
+                            Claimed {
+                                recipient: recipient,
+                                amount: current_amount_claimed,
+                                total_amount: total_amount
+                            }
+                        )
+                    );
 
-                self.emit(Claimed { claim });
+                self.token.read().transfer(recipient, current_amount_claimed.into());
 
                 true
+            } else {
+                self
+                    .emit(
+                        Event::Claimed(
+                            Claimed { recipient: recipient, amount: 0, total_amount: total_amount }
+                        )
+                    );
+
+                false
             }
         }
+    }
 
-        fn claim_128(
-            ref self: ContractState, mut claims: Span<Claim>, remaining_proof: Span<felt252>
-        ) -> u8 {
-            assert(claims.len() < 129, 'TOO_MANY_CLAIMS');
-            assert(!claims.is_empty(), 'CLAIMS_EMPTY');
-
-            // groups that cross bitmap boundaries should just make multiple calls
-            // this code already reduces the number of pedersens in the verification by a factor of ~7
-            let (word, index_u64) = DivRem::div_rem(*claims.at(0).id, BITMAP_SIZE);
-            assert(index_u64 == 0, 'FIRST_CLAIM_MUST_BE_MULT_128');
-
-            let root_of_group = compute_root_of_group(claims);
-
-            assert(
-                self.root.read() == compute_pedersen_root(root_of_group, remaining_proof),
-                'INVALID_PROOF'
-            );
-
-            let mut bitmap = self.claimed_bitmap.read(word);
-
-            let mut index: u8 = 0;
-            let mut unclaimed: Array<Claim> = ArrayTrait::new();
-
-            while let Option::Some(claim) = claims
-                .pop_front() {
-                    let already_claimed = Zeroable::is_non_zero(bitmap & exp2(index));
-
-                    if !already_claimed {
-                        bitmap = bitmap | exp2(index);
-                        unclaimed.append(*claim);
-                    }
-
-                    index += 1;
-                };
-
-            self.claimed_bitmap.write(word, bitmap);
-
-            let num_claimed = unclaimed.len();
-
-            // the event emittance and transfers are separated from the above to prevent re-entrance
-            let token = self.token.read();
-
-            while let Option::Some(claim) = unclaimed
-                .pop_front() {
-                    token.transfer(claim.claimee, claim.amount.into());
-                    self.emit(Claimed { claim });
-                };
-
-            // never fails because we assert claims length at the beginning so we know it's less than 128
-            num_claimed.try_into().unwrap()
+    fn compute_pedersen_root(current: felt252, mut proof: Span<felt252>) -> felt252 {
+        match proof.pop_front() {
+            Option::Some(proof_element) => {
+                compute_pedersen_root(hash_function(current, *proof_element), proof)
+            },
+            Option::None => { current },
         }
+    }
 
-        fn is_claimed(self: @ContractState, claim_id: u64) -> bool {
-            let (word, index) = claim_id_to_bitmap_index(claim_id);
-            let bitmap = self.claimed_bitmap.read(word);
-            Zeroable::is_non_zero(bitmap & exp2(index))
+    fn hash_function(a: felt252, b: felt252) -> felt252 {
+        let a_u256: u256 = a.into();
+        if a_u256 < b.into() {
+            core::pedersen::pedersen(a, b)
+        } else {
+            core::pedersen::pedersen(b, a)
+        }
+    }
+
+    fn calculate_claimable_amount(self: @ContractState, total_amount: u128) -> u128 {
+        let current_time = get_block_timestamp();
+        let start_time = self.start_time.read();
+
+        if current_time < start_time {
+            0
+        } else {
+            let duration_elapsed = current_time - start_time;
+            let vesting_duration = self.vesting_duration.read();
+
+            if duration_elapsed >= vesting_duration {
+                // All vested already
+                total_amount
+            } else {
+                // Hard-coded to be 25% of total amount
+                let unlocked_amount = total_amount / 4;
+                let vesting_amount = total_amount - unlocked_amount;
+
+                let vested_amount = vesting_amount
+                    * duration_elapsed.into()
+                    / vesting_duration.into();
+
+                unlocked_amount + vested_amount
+            }
         }
     }
 }

@@ -6,14 +6,19 @@ use traits::{Into, TryInto};
 use starknet::ContractAddress;
 use starknet::syscalls::deploy_syscall;
 
-use governance::{airdrop::{Airdrop, IAirdropDispatcher}, interfaces::erc20::{IERC20Dispatcher}};
+use airdrop::{airdrop::{Airdrop, IAirdropDispatcher}, interfaces::erc20::{IERC20Dispatcher}};
 
 use tests::mock;
 
 
-fn deploy_airdrop(token: ContractAddress, root: felt252) -> IAirdropDispatcher {
+fn deploy_airdrop(
+    token: ContractAddress, root: felt252, start_time: u64, vesting_duration: u64
+) -> IAirdropDispatcher {
     let (contract_address, _) = deploy_syscall(
-        Airdrop::TEST_CLASS_HASH.try_into().unwrap(), 0, array![token.into(), root].span(), false
+        Airdrop::TEST_CLASS_HASH.try_into().unwrap(),
+        0,
+        array![token.into(), root, start_time.into(), vesting_duration.into()].span(),
+        false
     )
         .unwrap();
 

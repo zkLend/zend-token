@@ -24,7 +24,7 @@ mkdir -p "$REPO_ROOT/build"
 
 cd ./airdrop
 
-compile governance::airdrop Airdrop
+compile airdrop::airdrop Airdrop
 
 if [ -n "$USER_ID" ] && [ -n "$GROUP_ID" ]; then
   chown -R $USER_ID:$GROUP_ID "$REPO_ROOT/build"
