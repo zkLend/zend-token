@@ -7,8 +7,8 @@ on:
 name: "Test"
 
 jobs:
-  test:
-    name: "Test"
+  test-l1:
+    name: "Test L1 contracts"
     runs-on: "ubuntu-latest"
     steps:
       - name: "Checkout source code"
@@ -24,3 +24,16 @@ jobs:
       - name: "Run foundry tests"
         run: |
           forge test
+
+  test-airdrop:
+    name: "Test airdrop contracts"
+    runs-on: "ubuntu-latest"
+    steps:
+      - name: "Checkout source code"
+        uses: "actions/checkout@v3"
+        with:
+          submodules: "recursive"
+
+      - name: "Run Cairo tests"
+        run: |
+          ./scripts/test_airdrop_with_docker.sh
